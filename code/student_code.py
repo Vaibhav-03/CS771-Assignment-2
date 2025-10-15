@@ -499,7 +499,7 @@ class SimpleViT(nn.Module):
                 layer_window_size = window_size
             blocks.append(TransformerBlock(embed_dim, num_heads, mlp_ratio, qkv_bias, dpr[i], norm_layer, act_layer, layer_window_size))
         self.transformer_blocks = nn.Sequential(*blocks)
-        self.out=nn.Linear((img_size // patch_size)*(img_size // patch_size)*embed_dim, num_classes)
+        self.out=nn.Linear(embed_dim, num_classes)
 
         if self.pos_embed is not None:
             trunc_normal_(self.pos_embed, std=0.02)
@@ -523,7 +523,8 @@ class SimpleViT(nn.Module):
         x = self.patch_embed(x)
         x = x + self.pos_embed if self.pos_embed is not None else x
         x = self.transformer_blocks(x)
-        x = self.out(x.view(x.shape[0],-1))
+        x = x.mean(dim=(1,2)) # global average pooling
+        x = self.out(x)
         return x
 
 # change this to your model!
