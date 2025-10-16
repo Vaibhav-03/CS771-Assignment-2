@@ -90,6 +90,12 @@ class CustomConv2DFunction(Function):
         output = output_patches.permute(0, 2, 1).contiguous().view(
             input_feats.size(0), weight.size(0), H_out, W_out
         )
+
+        # Important: return a cloned tensor to avoid returning a view from a
+        # custom autograd Function. Returning a view can cause issues when
+        # subsequent in-place ops (e.g., ReLU(inplace=True)) are applied and
+        # PyTorch's autograd can't reconcile view+inplace with custom backward.
+        output = output.clone()
         
         ########################################################################
 
@@ -142,17 +148,24 @@ class CustomConv2DFunction(Function):
             weight_reshaped = weight.view(weight.size(0), -1)  # (C_o, C_i * K * K)
             grad_patches = torch.matmul(grad_output_reshaped, weight_reshaped)  # (N, H_out * W_out, C_i * K * K)
             grad_patches = grad_patches.permute(0, 2, 1)  # (N, C_i * K * K, H_out * W_out)
-            
+
             # Fold back to get grad_input
             H_out = (input_height + 2 * padding - kernel_size) // stride + 1
             W_out = (input_width + 2 * padding - kernel_size) // stride + 1
-            grad_input_padded = fold(grad_patches, (input_height + 2 * padding, input_width + 2 * padding), kernel_size, stride=stride)
-            
+            grad_input_padded = fold(
+                grad_patches,
+                (input_height + 2 * padding, input_width + 2 * padding),
+                kernel_size,
+                stride=stride,
+            )
+
             # Remove padding to get final grad_input
             if padding > 0:
-                grad_input = grad_input_padded[:, :, padding:-padding, padding:-padding]
+                grad_input = grad_input_padded[:, :, padding:-padding, padding:-padding].contiguous()
             else:
-                grad_input = grad_input_padded
+                grad_input = grad_input_padded.contiguous()
+        else:
+            grad_input = None
         
         ########################################################################
         # compute the gradients w.r.t. input and params
