@@ -335,39 +335,52 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
 
     def forward(self, x):
-        # input size (B, H, W, C)
-        B, H, W, _ = x.shape
-        # qkv with shape (3, B, nHead, H * W, C)
+        # Accept either (B, H, W, C) or (B, N, C) where N = H*W or num tokens
+        orig_ndim = x.dim()
+        if x.dim() == 4:
+            B, H, W, C = x.shape
+            x_flat = x.view(B, H * W, C)
+            N = H * W
+            restore_shape = (B, H, W, C)
+        elif x.dim() == 3:
+            B, N, C = x.shape
+            x_flat = x
+            restore_shape = None
+        else:
+            raise ValueError(f"Unsupported input dims to Attention: {x.dim()}")
+
+        # qkv with shape (3, B, nHead, N, C_head)
         qkv = (
-            self.qkv(x).reshape(
-                B, H * W, 3, self.num_heads, -1
-            ).permute(2, 0, 3, 1, 4)
+            self.qkv(x_flat)
+            .reshape(B, N, 3, self.num_heads, -1)
+            .permute(2, 0, 3, 1, 4)
         )
-        # q, k, v with shape (B * nHead, H * W, C)
-        q, k, v = qkv.reshape(3, B * self.num_heads, H * W, -1).unbind(0)
-        ########################################################################
-        # Fill in the code here
-        
+
+        # q, k, v with shape (B * nHead, N, C_head)
+        q, k, v = qkv.reshape(3, B * self.num_heads, N, -1).unbind(0)
+
         # Compute attention scores: Q @ K^T / sqrt(d_k)
         attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale
-        
+
         # Apply softmax to get attention weights
         attn = attn.softmax(dim=-1)
-        
+
         # Apply attention to values: attn @ V
         attn_out = torch.matmul(attn, v)
-        
-        # Reshape back to (B, nHead, H * W, C)
-        attn_out = attn_out.reshape(B, self.num_heads, H * W, -1)
-        
-        # Concatenate heads: (B, H * W, C)
-        attn_out = attn_out.permute(0, 2, 1, 3).reshape(B, H * W, -1)
-        
+
+        # Reshape back to (B, nHead, N, C_head)
+        attn_out = attn_out.view(B, self.num_heads, N, -1)
+
+        # Concatenate heads: (B, N, C)
+        attn_out = attn_out.permute(0, 2, 1, 3).reshape(B, N, -1)
+
         # Apply final projection
-        x = self.proj(attn_out)
-        
-        ########################################################################
-        return x
+        x_out = self.proj(attn_out)
+
+        if restore_shape is not None:
+            # return in (B, H, W, C) format
+            return x_out.view(*restore_shape)
+        return x_out
 
 class TransformerBlock(nn.Module):
     """Transformer blocks with support of local window self-attention"""
@@ -427,18 +440,17 @@ class TransformerBlock(nn.Module):
             _, Hp, Wp, _ = x.shape
 
             # partition windows
-            x_windows = window_partition(x, self.window_size)  # (num_windows*B, window_size, window_size, C)
-            x_windows = x_windows.view(-1, self.window_size * self.window_size, C)  # (num_windows*B, window_size*window_size, C)
+            x_windows, (Hp, Wp) = window_partition(x, self.window_size)
+            # x_windows: (num_windows*B, window_size, window_size, C)
+            x_windows = x_windows.view(-1, self.window_size * self.window_size, C)
 
-            # W-MSA/SW-MSA
+            # W-MSA / SW-MSA
             attn_windows = self.attn(x_windows)  # (num_windows*B, window_size*window_size, C)
 
             # merge windows
             attn_windows = attn_windows.view(-1, self.window_size, self.window_size, C)
-            x = window_unpartition(attn_windows, self.window_size, Hp, Wp)  # (B, Hp, Wp, C)
-
-            # remove padding
-            x = x[:, :H, :W, :].contiguous()
+            # unpartition expects pad_hw and hw tuples
+            x = window_unpartition(attn_windows, self.window_size, (Hp, Wp), (H, W))
         else:
             # global attention
             B, H, W, C = x.shape
