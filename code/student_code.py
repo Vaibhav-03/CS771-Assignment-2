@@ -247,60 +247,90 @@ class CustomConv2d(Module):
 ################################################################################
 # Part I.2: Design and train a convolutional network
 ################################################################################
+class Bottleneck(nn.Module):
+    def __init__(self, conv_op, in_ch, mid_ch, out_ch, stride=1):
+        super().__init__()
+        self.conv1 = conv_op(in_ch, mid_ch, kernel_size=1, stride=1, padding=0, bias=False)
+        self.bn1   = nn.BatchNorm2d(mid_ch)
+        self.conv2 = conv_op(mid_ch, mid_ch, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn2   = nn.BatchNorm2d(mid_ch)
+        self.conv3 = conv_op(mid_ch, out_ch, kernel_size=1, stride=1, padding=0, bias=False)
+        self.bn3   = nn.BatchNorm2d(out_ch)
+        self.relu  = nn.ReLU(inplace=False)
+
+        
+        self.downsample = None
+        if stride != 1 or in_ch != out_ch:
+            self.downsample = nn.Sequential(
+                conv_op(in_ch, out_ch, kernel_size=1, stride=stride, padding=0, bias=False),
+                nn.BatchNorm2d(out_ch)
+            )
+
+    def forward(self, x):
+        identity = x
+        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.relu(self.bn2(self.conv2(out)))
+        out = self.bn3(self.conv3(out))
+        if self.downsample is not None:
+            identity = self.downsample(identity)
+        out = self.relu(out + identity)
+        return out
+
 class SimpleNet(nn.Module):
-    # a simple CNN for image classifcation
-    def __init__(self, conv_op=nn.Conv2d, num_classes=100):
+    # improved simple CNN for image classification
+    def __init__(self, conv_op=nn.Conv2d, num_classes=100, dropout=0.0):
         super(SimpleNet, self).__init__()
-        # you can start from here and create a better model
-        self.features = nn.Sequential(
-            # conv1 block: conv 7x7
-            conv_op(3, 64, kernel_size=7, stride=2, padding=3),
-            nn.ReLU(inplace=True),
-            # max pooling 1/2
+
+        # Stem: use a lighter 3x3 stack instead of a heavy 7x7
+        self.stem = nn.Sequential(
+            conv_op(3, 32, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=False),
+            conv_op(32, 32, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=False),
+            conv_op(32, 64, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=False),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
-            # conv2 block: simple bottleneck
-            conv_op(64, 64, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(inplace=True),
-            conv_op(64, 64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(inplace=True),
-            conv_op(64, 256, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(inplace=True),
-            # max pooling 1/2
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
-            # conv3 block: simple bottleneck
-            conv_op(256, 128, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(inplace=True),
-            conv_op(128, 128, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(inplace=True),
-            conv_op(128, 512, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(inplace=True),
         )
-        # global avg pooling + FC
+
+        
+        self.layer2 = Bottleneck(conv_op, in_ch=64,  mid_ch=64,  out_ch=256, stride=1)
+        self.pool2  = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
+        self.layer3 = Bottleneck(conv_op, in_ch=256, mid_ch=128, out_ch=512, stride=1)
+
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
         self.fc = nn.Linear(512, num_classes)
 
+        self.reset_parameters()
+
     def reset_parameters(self):
-        # init all params
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(
-                    m.weight, mode="fan_out", nonlinearity="relu"
-                )
-                if m.bias is not None:
-                    nn.init.consintat_(m.bias, 0.0)
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+                if getattr(m, "bias", None) is not None:
+                    nn.init.constant_(m.bias, 0.0)
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight, 1.0)
                 nn.init.constant_(m.bias, 0.0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0.0)
 
     def forward(self, x):
-        # you can implement adversarial training here
-        # if self.training:
-        #   # generate adversarial sample based on x
-        x = self.features(x)
+        x = self.stem(x)
+        x = self.layer2(x)
+        x = self.pool2(x)
+        x = self.layer3(x)
         x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
+        x = torch.flatten(x, 1)
+        x = self.dropout(x)
         x = self.fc(x)
         return x
+
 
 # change this to your model!
 default_cnn_model = SimpleNet
