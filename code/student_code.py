@@ -733,7 +733,7 @@ class PGDAttack(object):
             grad = torch.autograd.grad(loss, adv_input, retain_graph=False, create_graph=False)[0]
             adv_input = adv_input + self.step_size * grad.sign()
             delta = torch.clamp (adv_input - input, min = -self.epsilon, max = self.epsilon)
-            adv_input = torch.clamp(adv_input + delta, min = 0, max = 1).detach()
+            adv_input = torch.clamp(input + delta, min = 0, max = 1).detach()
 
         output = adv_input         
         ########################################################################
