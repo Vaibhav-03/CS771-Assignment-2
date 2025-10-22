@@ -321,42 +321,38 @@ class SimpleNet(nn.Module):
                 nn.init.constant_(m.bias, 0.0)
 
     def forward(self, x, adv_eps = 1e-4):
-        if self.training: 
-            x_adv = x.detach().clone().requires_grad_(True)
-            was_training = self.training
+        if self.training:
             self.eval()
+            x_adv = x.detach().clone().requires_grad_(True)
+            x_adv = self.stem(x_adv)
+            x_adv = self.layer2(x_adv)
+            x_adv = self.pool2(x_adv)
+            x_adv = self.layer3(x_adv)
+            x_adv = self.avgpool(x_adv)
+            x_adv = torch.flatten(x_adv, 1)
+            x_adv = self.dropout(x_adv)
+            logits = self.fc(x_adv)
 
-            feats = self.features(x_adv)
-            feats = self.avgpool(feats)
-            feats = feats.view(feats.size(0), -1)
-            logits = self.fc(feats)
+            (B, C) = logits.shape 
+            targets = torch.randint(1, C, (B,))
+            loss = nn.CrossEntropyLoss()(logits, targets)
 
-            criterion = nn.CrossEntropyLoss()
-            loss = criterion(logits, )
-
-            # gradient of loss w.r.t. input (no backward on model params)
             grad_x = torch.autograd.grad(loss, x_adv, retain_graph=False, create_graph=False)[0]
-
             with torch.no_grad():
                 x_adv = x_adv + adv_eps * grad_x.sign()
-                x_adv = x_adv.clamp(0.0, 1.0)   # adjust if inputs use different range
-
-            # restore training mode if needed
-            if was_training:
-                self.train()
-
-            # use adversarial example for rest of forward
-            x = x_adv.detach()  # detach to avo
-
-            x = self.stem(x)
-            x = self.layer2(x)
-            x = self.pool2(x)
-            x = self.layer3(x)
-            x = self.avgpool(x)
-            x = torch.flatten(x, 1)
-            x = self.dropout(x)
-            x = self.fc(x)
-            return x
+                delta = torch.clamp (x_adv - x, min = -adv_eps, max = adv_eps)
+                x_adv = torch.clamp(x + delta, min = 0, max = 1).detach()
+                
+        x = x_adv.detach() 
+        x = self.stem(x)
+        x = self.layer2(x)
+        x = self.pool2(x)
+        x = self.layer3(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.dropout(x)
+        x = self.fc(x)
+        return x
 
 
 # change this to your model!
