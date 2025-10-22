@@ -322,25 +322,25 @@ class SimpleNet(nn.Module):
 
     def forward(self, x, adv_eps = 1e-4):
         x_adv = x.detach().clone().requires_grad_(True)
-        if self.training:
-            self.eval()
-            y = self.stem(x_adv)
-            y = self.layer2(y)
-            y = self.pool2(y)
-            y = self.layer3(y)
-            y = self.avgpool(y)
-            y = torch.flatten(y, 1)
-            y = self.dropout(y)
-            logits = self.fc(y)
+        # if self.training:
+        #     self.eval()
+        #     y = self.stem(x_adv)
+        #     y = self.layer2(y)
+        #     y = self.pool2(y)
+        #     y = self.layer3(y)
+        #     y = self.avgpool(y)
+        #     y = torch.flatten(y, 1)
+        #     y = self.dropout(y)
+        #     logits = self.fc(y)
 
-            (B, C) = logits.shape 
-            targets = torch.randint(1, C, (B,)).to(logits.device)
-            loss = nn.CrossEntropyLoss()(logits, targets)
-            grad_x = torch.autograd.grad(loss, x_adv, retain_graph=False, create_graph=False)[0]
-            with torch.no_grad():
-                x_adv = x_adv + adv_eps * grad_x.sign()
-                delta = torch.clamp (x_adv - x, min = -adv_eps, max = adv_eps)
-                x_adv = torch.clamp(x + delta, min = 0, max = 1).detach()
+        #     (B, C) = logits.shape 
+        #     targets = torch.randint(1, C, (B,)).to(logits.device)
+        #     loss = nn.CrossEntropyLoss()(logits, targets)
+        #     grad_x = torch.autograd.grad(loss, x_adv, retain_graph=False, create_graph=False)[0]
+        #     with torch.no_grad():
+        #         x_adv = x_adv + adv_eps * grad_x.sign()
+        #         delta = torch.clamp (x_adv - x, min = -adv_eps, max = adv_eps)
+        #         x_adv = torch.clamp(x + delta, min = 0, max = 1).detach()
                 
         x = x_adv.detach() 
         x = self.stem(x)
