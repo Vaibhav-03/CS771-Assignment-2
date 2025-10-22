@@ -324,14 +324,14 @@ class SimpleNet(nn.Module):
         if self.training:
             self.eval()
             x_adv = x.detach().clone().requires_grad_(True)
-            x_adv = self.stem(x_adv)
-            x_adv = self.layer2(x_adv)
-            x_adv = self.pool2(x_adv)
-            x_adv = self.layer3(x_adv)
-            x_adv = self.avgpool(x_adv)
-            x_adv = torch.flatten(x_adv, 1)
-            x_adv = self.dropout(x_adv)
-            logits = self.fc(x_adv)
+            y = self.stem(x_adv)
+            y = self.layer2(y)
+            y = self.pool2(y)
+            y = self.layer3(y)
+            y = self.avgpool(y)
+            y = torch.flatten(y, 1)
+            y = self.dropout(y)
+            logits = self.fc(y)
 
             (B, C) = logits.shape 
             targets = torch.randint(1, C, (B,)).to(logits.device)
