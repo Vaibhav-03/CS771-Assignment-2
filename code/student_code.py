@@ -637,6 +637,7 @@ class PGDAttack(object):
         self.step_size = step_size
         self.epsilon = epsilon
 
+    
     def perturb(self, model, input):
         """
         Given input image X (torch tensor), return an adversarial sample
@@ -654,15 +655,27 @@ class PGDAttack(object):
         # clone the input tensor and disable the gradients
         output = input.clone()
         input.requires_grad = False
-
         # loop over the number of steps
         # for _ in range(self.num_steps):
-        ########################################################################
-        # Fill in the code here
-        ########################################################################
+        with torch.no_grad():
+            logits = model(input)
+            least_conf_label = logits.argmin(dim=1)
 
+        ########################################################################
+        adv_input = input.clone().detach()
+        for _ in range(self.num_steps): 
+            adv_input.requires_grad = True
+            output = model(adv_input)
+            loss = torch.nn.CrossEntropyLoss()(output, least_conf_label)
+            grad = torch.autograd.grad(loss, adv_input, retain_graph=False, create_graph=False)[0]
+            adv_input = adv_input + self.step_size * grad.sign()
+            delta = torch.clamp (adv_input - input, min = -self.epsilon, max = self.epsilon)
+            adv_input = torch.clamp(input + delta, min = 0, max = 1).detach()
+
+        output = adv_input         
+        ########################################################################
         return output
-
+    
 default_attack = PGDAttack
 
 
