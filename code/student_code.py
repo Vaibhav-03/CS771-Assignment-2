@@ -321,7 +321,7 @@ class SimpleNet(nn.Module):
                 nn.init.constant_(m.bias, 0.0)
 
     def forward(self, x, adv_eps = 1e-4):
-        x_adv = x.detach().clone().requires_grad_(True)
+        # x_adv = x.detach().clone().requires_grad_(True)
         # if self.training:
         #     self.eval()
         #     y = self.stem(x_adv)
@@ -342,7 +342,7 @@ class SimpleNet(nn.Module):
         #         delta = torch.clamp (x_adv - x, min = -adv_eps, max = adv_eps)
         #         x_adv = torch.clamp(x + delta, min = 0, max = 1).detach()
                 
-        x = x_adv.detach() 
+        # x = x_adv.detach() 
         x = self.stem(x)
         x = self.layer2(x)
         x = self.pool2(x)
