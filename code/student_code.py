@@ -321,9 +321,9 @@ class SimpleNet(nn.Module):
                 nn.init.constant_(m.bias, 0.0)
 
     def forward(self, x, adv_eps = 1e-4):
+        x_adv = x.detach().clone().requires_grad_(True)
         if self.training:
             self.eval()
-            x_adv = x.detach().clone().requires_grad_(True)
             y = self.stem(x_adv)
             y = self.layer2(y)
             y = self.pool2(y)
