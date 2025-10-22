@@ -394,7 +394,7 @@ class Attention(nn.Module):
         att = torch.nn.functional.softmax(att, dim=-1) # (B * nHead, H * W, H * W)
         x = (att @ v) # (B * nHead, H * W, C)
         x = x.view(B, self.num_heads, H * W, -1) # (B, nHead, H * W, C)
-        x = x.permute(0, 2, 1, 3).view(B, H * W, -1) # (B, H * W, nHead * C)
+        x = x.permute(0, 2, 1, 3).reshape(B, H * W, -1) # (B, H * W, nHead * C)
         x = self.proj(x).view(B, H, W, -1) # (B, H, W, C)
         return x
 
