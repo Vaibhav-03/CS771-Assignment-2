@@ -320,7 +320,28 @@ class SimpleNet(nn.Module):
                 nn.init.normal_(m.weight, 0, 0.01)
                 nn.init.constant_(m.bias, 0.0)
 
-    def forward(self, x):
+    def forward(self, x, adv_eps=1e-4):
+        if self.training:
+            x_adv = x.detach().clone().requires_grad_(True)
+            self.eval()
+            y = self.stem(x_adv)
+            y = self.layer2(y)
+            y = self.pool2(y)
+            y = self.layer3(y)
+            y = self.avgpool(y)
+            y = torch.flatten(y, 1)
+            y = self.dropout(y)
+            logits = self.fc(y)
+
+            (B, C) = logits.shape 
+            targets = torch.randint(1, C, (B,)).to(logits.device)
+            loss = nn.CrossEntropyLoss()(logits, targets)
+            grad_x = torch.autograd.grad(loss, x_adv, retain_graph=False, create_graph=False)[0]
+            with torch.no_grad():
+                x_adv = x_adv + adv_eps * grad_x.sign()
+                delta = torch.clamp (x_adv - x, min = -adv_eps, max = adv_eps)
+                x = torch.clamp(x + delta, min = 0, max = 1).detach()
+
         x = self.stem(x)
         x = self.layer2(x)
         x = self.pool2(x)
