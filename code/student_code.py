@@ -334,9 +334,8 @@ class SimpleNet(nn.Module):
             logits = self.fc(x_adv)
 
             (B, C) = logits.shape 
-            targets = torch.randint(1, C, (B,))
+            targets = torch.randint(1, C, (B,)).to(logits.device)
             loss = nn.CrossEntropyLoss()(logits, targets)
-
             grad_x = torch.autograd.grad(loss, x_adv, retain_graph=False, create_graph=False)[0]
             with torch.no_grad():
                 x_adv = x_adv + adv_eps * grad_x.sign()
