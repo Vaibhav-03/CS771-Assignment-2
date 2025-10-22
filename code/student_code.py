@@ -746,6 +746,7 @@ class PGDAttack(object):
             logits = model(input)
             least_conf_label = logits.argmin(dim=1)
 
+        least_conf_label = least_conf_label.to(input.device).long()
         ########################################################################
         adv_input = input.clone().detach()
         for _ in range(self.num_steps): 
