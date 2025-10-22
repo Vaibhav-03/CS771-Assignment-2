@@ -385,32 +385,18 @@ class Attention(nn.Module):
             .reshape(B, N, 3, self.num_heads, -1)
             .permute(2, 0, 3, 1, 4)
         )
-
-        # q, k, v with shape (B * nHead, N, C_head)
-        q, k, v = qkv.reshape(3, B * self.num_heads, N, -1).unbind(0)
-
-        # Compute attention scores: Q @ K^T / sqrt(d_k)
-        attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale
-
-        # Apply softmax to get attention weights
-        attn = attn.softmax(dim=-1)
-
-        # Apply attention to values: attn @ V
-        attn_out = torch.matmul(attn, v)
-
-        # Reshape back to (B, nHead, N, C_head)
-        attn_out = attn_out.view(B, self.num_heads, N, -1)
-
-        # Concatenate heads: (B, N, C)
-        attn_out = attn_out.permute(0, 2, 1, 3).reshape(B, N, -1)
-
-        # Apply final projection
-        x_out = self.proj(attn_out)
-
-        if restore_shape is not None:
-            # return in (B, H, W, C) format
-            return x_out.view(*restore_shape)
-        return x_out
+        # q, k, v with shape (B * nHead, H * W, C)
+        q, k, v = qkv.reshape(3, B * self.num_heads, H * W, -1).unbind(0)
+        ########################################################################
+        # Fill in the code here
+        ########################################################################
+        att = (q @ k.transpose(-2, -1)) * self.scale # (B * nHead, H * W, H * W)
+        att = torch.nn.functional.softmax(att, dim=-1) # (B * nHead, H * W, H * W)
+        x = (att @ v) # (B * nHead, H * W, C)
+        x = x.view(B, self.num_heads, H * W, -1) # (B, nHead, H * W, C)
+        x = x.permute(0, 2, 1, 3).view(B, H * W, -1) # (B, H * W, nHead * C)
+        x = self.proj(x).view(B, H, W, -1) # (B, H, W, C)
+        return x
 
 class TransformerBlock(nn.Module):
     """Transformer blocks with support of local window self-attention"""
@@ -461,42 +447,23 @@ class TransformerBlock(nn.Module):
 
         ########################################################################
         # Fill in the code here
-        if self.window_size > 0:
-            # pad feature maps to multiples of window size
-            B, H, W, C = x.shape
-            pad_r = (self.window_size - W % self.window_size) % self.window_size
-            pad_b = (self.window_size - H % self.window_size) % self.window_size
-            x = nn.functional.pad(x, (0, 0, 0, pad_r, 0, pad_b))
-            _, Hp, Wp, _ = x.shape
-
-            # partition windows
-            x_windows, (Hp, Wp) = window_partition(x, self.window_size)
-            # x_windows: (num_windows*B, window_size, window_size, C)
-            x_windows = x_windows.view(-1, self.window_size * self.window_size, C)
-
-            # W-MSA / SW-MSA
-            attn_windows = self.attn(x_windows)  # (num_windows*B, window_size*window_size, C)
-
-            # merge windows
-            attn_windows = attn_windows.view(-1, self.window_size, self.window_size, C)
-            # unpartition expects pad_hw and hw tuples
-            x = window_unpartition(attn_windows, self.window_size, (Hp, Wp), (H, W))
-        else:
-            # global attention
-            B, H, W, C = x.shape
-            x = x.view(B, H * W, C)
-            x = self.attn(x)
-            x = x.view(B, H, W, C)
-        x = shortcut + self.drop_path(x)
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
-
         ########################################################################
+        if self.window_size > 0:
+            _, H, W, _ = x.shape
+            # partition windows
+            x_windows, pad_hw = window_partition(x, self.window_size) #[B * num_windows, window_size, window_size, C], (Hp, Wp)
+            attn_windows = self.attn(x_windows)  # (B * num_windows, window_size, window_size, C)
+            x = window_unpartition(attn_windows, self.window_size, pad_hw, (H, W))  # (B, H, W, C)
+        else:
+            #global attention
+            x = self.attn(x)
+
         # The implementation shall support local self-attention
         # (also known as window attention)
 
         # MLP after MSA, both can be dropped at random
-        # x = shortcut + self.drop_path(x)
-        # x = x + self.drop_path(self.mlp(self.norm2(x)))
+        x = shortcut + self.drop_path(x)
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
 
@@ -578,39 +545,16 @@ class SimpleViT(nn.Module):
 
         ########################################################################
         # Fill in the code here
-        # transformer blocks
-        self.blocks = nn.ModuleList()
-        for i in range(depth):
-            if i in window_block_indexes:
-                block = TransformerBlock(
-                    dim=embed_dim,
-                    num_heads=num_heads,
-                    mlp_ratio=mlp_ratio,
-                    qkv_bias=qkv_bias,
-                    drop_path=dpr[i],
-                    norm_layer=norm_layer,
-                    act_layer=act_layer,
-                    window_size=window_size
-                )
-            else:
-                block = TransformerBlock(
-                    dim=embed_dim,
-                    num_heads=num_heads,
-                    mlp_ratio=mlp_ratio,
-                    qkv_bias=qkv_bias,
-                    drop_path=dpr[i],
-                    norm_layer=norm_layer,
-                    act_layer=act_layer,
-                    window_size=0  # global attention
-                )
-            self.blocks.append(block)
-        self.norm = norm_layer(embed_dim)
-        self.head = nn.Linear(embed_dim, num_classes)
-
-        
-
         ########################################################################
         # The implementation shall define some Transformer blocks
+        blocks = []
+        for i in range(depth):
+            layer_window_size=0
+            if i in window_block_indexes:
+                layer_window_size = window_size
+            blocks.append(TransformerBlock(embed_dim, num_heads, mlp_ratio, qkv_bias, dpr[i], norm_layer, act_layer, layer_window_size))
+        self.transformer_blocks = nn.Sequential(*blocks)
+        self.out=nn.Linear(embed_dim, num_classes)
 
         if self.pos_embed is not None:
             trunc_normal_(self.pos_embed, std=0.02)
@@ -630,19 +574,12 @@ class SimpleViT(nn.Module):
     def forward(self, x):
         ########################################################################
         # Fill in the code here
-        # x shape (B, C, H, W)
-        x = self.patch_embed(x)  # (B, H', W', C)
-        if self.pos_embed is not None:
-            x = x + self.pos_embed
-            # add positional embedding
-        for block in self.blocks:
-            x = block(x)
-            # pass through transformer blocks
-        x = self.norm(x)  # (B, H', W', C)
-        x = x.mean(dim=(1, 2))  # global average pooling (B, C)
-        x = self.head(x)  # (B, num_classes)
-        # classification head
         ########################################################################
+        x = self.patch_embed(x)
+        x = x + self.pos_embed if self.pos_embed is not None else x
+        x = self.transformer_blocks(x)
+        x = x.mean(dim=(1,2)) # global average pooling
+        x = self.out(x)
         return x
 
 # change this to your model!
